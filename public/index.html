@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests; block-all-mixed-content">
     <title>Torrent Streamer</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -633,7 +632,7 @@
         </div>
 
         <div class="search-container">
-            <form class="search-form" id="searchForm">
+            <form class="search-form" id="searchForm" action="javascript:void(0)" method="get">
                 <input type="text" class="search-input" id="searchInput" placeholder="Введите название фильма или сериала..." required>
                 <button type="submit" class="search-btn" id="searchBtn">
                     <i class="fas fa-search"></i> Поиск
@@ -700,6 +699,6 @@
         </div>
     </div>
 
-    <script src="/app.js?v=20251025v19"></script>
+    <script src="/app.js?v=20251025v20"></script>
 </body>
 </html>
