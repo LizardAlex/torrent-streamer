@@ -49,6 +49,44 @@ class TorrentApp {
         }
     }
 
+    // Функции для отслеживания просмотренных серий
+    loadWatchedEpisodes() {
+        try {
+            const data = localStorage.getItem('watched_episodes');
+            return data ? JSON.parse(data) : {};
+        } catch (error) {
+            console.error('Error loading watched episodes:', error);
+            return {};
+        }
+    }
+
+    saveWatchedEpisodes(watchedEpisodes) {
+        try {
+            localStorage.setItem('watched_episodes', JSON.stringify(watchedEpisodes));
+        } catch (error) {
+            console.error('Error saving watched episodes:', error);
+        }
+    }
+
+    markEpisodeAsWatched(torrentHash, episodeIndex) {
+        const watchedEpisodes = this.loadWatchedEpisodes();
+        
+        if (!watchedEpisodes[torrentHash]) {
+            watchedEpisodes[torrentHash] = [];
+        }
+        
+        if (!watchedEpisodes[torrentHash].includes(episodeIndex)) {
+            watchedEpisodes[torrentHash].push(episodeIndex);
+            this.saveWatchedEpisodes(watchedEpisodes);
+            console.log(`✅ Episode ${episodeIndex + 1} marked as watched for torrent ${torrentHash}`);
+        }
+    }
+
+    isEpisodeWatched(torrentHash, episodeIndex) {
+        const watchedEpisodes = this.loadWatchedEpisodes();
+        return watchedEpisodes[torrentHash] && watchedEpisodes[torrentHash].includes(episodeIndex);
+    }
+
     addToRecentlyWatched(torrent) {
         const magnetLink = torrent.magnetLink || torrent.link;
         // Удаляем дубликат если есть
@@ -377,13 +415,15 @@ class TorrentApp {
                         </div>
                     </div>
                     <div class="file-list">
-                        ${data.files.map((file, index) => `
-                            <div class="file-item" data-stream-url="${file.streamUrl}" data-m3u8-url="${file.m3u8Url || file.streamUrl}" data-transcode-url="${file.transcodeUrl || ''}" data-file-name="${this.escapeHtml(file.name)}" data-file-index="${index}">
+                        ${data.files.map((file, index) => {
+                            const isWatched = this.isEpisodeWatched(hash, index);
+                            return `
+                            <div class="file-item ${isWatched ? 'watched' : ''}" data-stream-url="${file.streamUrl}" data-m3u8-url="${file.m3u8Url || file.streamUrl}" data-transcode-url="${file.transcodeUrl || ''}" data-file-name="${this.escapeHtml(file.name)}" data-file-index="${index}">
                                 <div class="file-info">
                                     <div class="file-number">${index + 1}</div>
                                     <div class="file-details">
                                         <div class="file-name">${this.escapeHtml(file.name)}</div>
-                                        <div class="file-size">${file.sizeFormatted}</div>
+                                        <div class="file-size">${file.sizeFormatted}${isWatched ? ' <i class="fas fa-check-circle" style="color: #4a9eff;"></i>' : ''}</div>
                                     </div>
                                 </div>
                                 <div class="file-actions">
@@ -395,7 +435,7 @@ class TorrentApp {
                                     </button>
                                 </div>
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
                 </div>
             `;
@@ -667,6 +707,11 @@ class TorrentApp {
 
         const currentIndex = this.currentFileIndex;
         const nextIndex = currentIndex + 1;
+
+        // Отмечаем текущую серию как просмотренную
+        if (this.currentTorrent && this.currentTorrent.hash) {
+            this.markEpisodeAsWatched(this.currentTorrent.hash, currentIndex);
+        }
 
         if (nextIndex < this.currentTorrent.files.length) {
             const nextFile = this.currentTorrent.files[nextIndex];

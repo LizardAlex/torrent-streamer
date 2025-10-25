@@ -398,6 +398,17 @@
             background: #0a0a0a;
         }
 
+        /* Просмотренные серии - синяя подложка */
+        .file-item.watched {
+            background: linear-gradient(135deg, rgba(74, 158, 255, 0.15) 0%, rgba(74, 158, 255, 0.05) 100%);
+            border-color: rgba(74, 158, 255, 0.3);
+        }
+
+        .file-item.watched:hover {
+            background: linear-gradient(135deg, rgba(74, 158, 255, 0.25) 0%, rgba(74, 158, 255, 0.1) 100%);
+            border-color: rgba(74, 158, 255, 0.5);
+        }
+
         .file-item:hover {
             background: #222;
             border-color: #667eea;
@@ -805,6 +816,6 @@
         </div>
     </div>
 
-    <script src="/app.js?v=1761423921"></script>
+    <script src="/app.js?v=1761424479"></script>
 </body>
 </html>
