@@ -213,6 +213,67 @@ app.get('/api/stream/:filename(*)', async (req, res) => {
   }
 });
 
+// HEAD endpoint для получения длительности видео
+app.head('/api/transcode/:filename?', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    
+    // Формируем URL к оригинальному потоку torrServer
+    const queryString = Object.keys(req.query)
+      .filter(key => key !== 'seek')
+      .map(key => {
+        const value = req.query[key];
+        return value !== '' && value !== undefined ? `${key}=${value}` : key;
+      })
+      .join('&');
+    
+    const streamPath = filename ? `/${filename}` : '';
+    const streamUrl = `http://217.144.98.80:8090/stream${streamPath}${queryString ? '?' + queryString : ''}`;
+    
+    console.log('📏 HEAD request: Getting video duration with ffprobe for:', streamUrl);
+    
+    // Получаем длительность видео через ffprobe
+    const ffprobe = spawn('ffprobe', [
+      '-headers', `Authorization: Basic ${Buffer.from('user1:test123').toString('base64')}`,
+      '-v', 'quiet',
+      '-print_format', 'json',
+      '-show_format',
+      '-analyzeduration', '5000000',
+      '-probesize', '5000000',
+      streamUrl
+    ]);
+    
+    let probeOutput = '';
+    ffprobe.stdout.on('data', (data) => {
+      probeOutput += data.toString();
+    });
+    
+    await new Promise((resolve) => {
+      ffprobe.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const probeData = JSON.parse(probeOutput);
+            if (probeData.format && probeData.format.duration) {
+              const videoDuration = Math.floor(parseFloat(probeData.format.duration));
+              console.log(`✅ HEAD: Video duration: ${videoDuration}s (${Math.floor(videoDuration/60)}:${(videoDuration%60).toString().padStart(2,'0')})`);
+              res.setHeader('X-Video-Duration', videoDuration.toString());
+            }
+          } catch (e) {
+            console.error('Failed to parse ffprobe output:', e);
+          }
+        }
+        resolve();
+      });
+    });
+    
+    res.setHeader('Content-Type', 'video/x-matroska');
+    res.status(200).end();
+  } catch (error) {
+    console.error('HEAD transcode error:', error.message);
+    res.status(500).end();
+  }
+});
+
 // FFmpeg transcoding endpoint for Xbox compatibility with seeking support
 app.get('/api/transcode/:filename?', async (req, res) => {
   try {
@@ -245,9 +306,51 @@ app.get('/api/transcode/:filename?', async (req, res) => {
       console.log('🎵 Starting FFmpeg audio-only transcoding (video copy) for:', streamUrl);
     }
     
+    // Получаем длительность видео через ffprobe (только при первом запуске без seek)
+    let videoDuration = null;
+    if (seekTime === 0) {
+      console.log('📏 Getting video duration with ffprobe...');
+      const ffprobe = spawn('ffprobe', [
+        '-headers', `Authorization: Basic ${Buffer.from('user1:test123').toString('base64')}`,
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_format',
+        '-analyzeduration', '5000000',
+        '-probesize', '5000000',
+        streamUrl
+      ]);
+      
+      let probeOutput = '';
+      ffprobe.stdout.on('data', (data) => {
+        probeOutput += data.toString();
+      });
+      
+      await new Promise((resolve) => {
+        ffprobe.on('close', (code) => {
+          if (code === 0) {
+            try {
+              const probeData = JSON.parse(probeOutput);
+              if (probeData.format && probeData.format.duration) {
+                videoDuration = Math.floor(parseFloat(probeData.format.duration));
+                console.log(`✅ Video duration: ${videoDuration}s (${Math.floor(videoDuration/60)}:${(videoDuration%60).toString().padStart(2,'0')})`);
+              }
+            } catch (e) {
+              console.error('Failed to parse ffprobe output:', e);
+            }
+          }
+          resolve();
+        });
+      });
+    }
+    
     // Настройка заголовков для видео потока (Matroska/MKV)
     res.setHeader('Content-Type', 'video/x-matroska');
     res.setHeader('Transfer-Encoding', 'chunked');
+    
+    // Отправляем длительность в заголовке (если получили)
+    if (videoDuration !== null) {
+      res.setHeader('X-Video-Duration', videoDuration.toString());
+    }
     
     // FFmpeg команда для транскодинга ТОЛЬКО АУДИО (видео копируется без изменений)
     // -ss: начальная позиция (ПЕРЕД -i для быстрого seek)

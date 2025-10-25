@@ -98,20 +98,30 @@ class TorrentApp {
         }
     }
 
-    savePlaybackPosition(torrentHash, episodeIndex, currentTime, isTranscoded = false) {
+    savePlaybackPosition(torrentHash, episodeIndex, currentTime, isTranscoded = false, duration = null) {
         try {
             const positions = this.loadPlaybackPositions();
             const key = `${torrentHash}_${episodeIndex}`;
             
             // Сохраняем позицию только если прошло больше 5 секунд
             if (currentTime > 5) {
-                positions[key] = {
+                const positionData = {
                     time: Math.floor(currentTime),
                     isTranscoded: isTranscoded,
                     timestamp: Date.now()
                 };
+                
+                // Сохраняем длительность если она передана или уже есть
+                if (duration) {
+                    positionData.duration = Math.floor(duration);
+                } else if (positions[key] && positions[key].duration) {
+                    // Сохраняем существующую длительность
+                    positionData.duration = positions[key].duration;
+                }
+                
+                positions[key] = positionData;
                 localStorage.setItem('playback_positions', JSON.stringify(positions));
-                console.log(`💾 Saved position: ${Math.floor(currentTime)}s for ${key}`);
+                console.log(`💾 Saved position: ${Math.floor(currentTime)}s for ${key}${duration ? ` (duration: ${Math.floor(duration)}s)` : ''}`);
             }
         } catch (error) {
             console.error('Error saving playback position:', error);
@@ -479,7 +489,7 @@ class TorrentApp {
                         <h3>Выберите файл для воспроизведения:</h3>
                         <p class="file-count">${data.files.length} файлов</p>
                         <div style="margin-top: 10px; padding: 10px; background-color: #3a3a3a; border-radius: 5px; font-size: 0.85rem; color: #ffaa00;">
-                            <i class="fas fa-info-circle"></i> <strong>Совет:</strong> Если нет звука, попробуйте другую раздачу (избегайте AVI, выбирайте MP4/MKV с AAC аудио).
+                            <i class="fas fa-info-circle"></i> <strong>Совет:</strong> Если видео не воспроизводится, попробуйте другую раздачу (избегайте AVI, выбирайте MP4/MKV с AAC аудио).
                         </div>
                     </div>
                     <div class="file-list">
@@ -623,6 +633,40 @@ class TorrentApp {
         // Используем ТОЛЬКО прямое воспроизведение, т.к. torrServer возвращает M3U (не M3U8)
         // HLS.js не работает с M3U плейлистами от torrServer
         console.log('Using direct video streaming via proxy');
+        
+        // Для транскодинга: пытаемся получить длительность из заголовка ответа
+        if (isTranscoded) {
+            fetch(streamUrl, { method: 'HEAD' })
+                .then(response => {
+                    const duration = response.headers.get('X-Video-Duration');
+                    if (duration) {
+                        const durationSeconds = parseInt(duration);
+                        console.log(`📏 Got duration from server: ${durationSeconds}s (${Math.floor(durationSeconds/60)}:${(durationSeconds%60).toString().padStart(2,'0')})`);
+                        
+                        // Сохраняем только длительность, не трогая currentTime
+                        const allPositions = this.loadPlaybackPositions();
+                        const positionKey = `${this.currentTorrent.hash}_${index}`;
+                        
+                        if (allPositions[positionKey]) {
+                            // Обновляем только duration, сохраняя существующий time
+                            allPositions[positionKey].duration = durationSeconds;
+                        } else {
+                            // Создаем новую запись с duration
+                            allPositions[positionKey] = {
+                                time: 0,
+                                isTranscoded: true,
+                                timestamp: Date.now(),
+                                duration: durationSeconds
+                            };
+                        }
+                        
+                        localStorage.setItem('playback_positions', JSON.stringify(allPositions));
+                        console.log(`💾 Duration saved: ${durationSeconds}s for ${positionKey}`);
+                    }
+                })
+                .catch(err => console.warn('Failed to get duration from header:', err));
+        }
+        
         videoPlayer.src = streamUrl;
         
         // Устанавливаем позицию для прямого потока
@@ -640,7 +684,8 @@ class TorrentApp {
                 const currentTime = isTranscoded ? 
                     (videoPlayer.currentTime + (this.transcodeTimeOffset || 0)) : 
                     videoPlayer.currentTime;
-                this.savePlaybackPosition(this.currentTorrent.hash, index, currentTime, isTranscoded);
+                const duration = !isTranscoded && videoPlayer.duration > 0 ? videoPlayer.duration : null;
+                this.savePlaybackPosition(this.currentTorrent.hash, index, currentTime, isTranscoded, duration);
             }
         }, 10000);
         
@@ -649,13 +694,71 @@ class TorrentApp {
             const currentTime = isTranscoded ? 
                 (videoPlayer.currentTime + (this.transcodeTimeOffset || 0)) : 
                 videoPlayer.currentTime;
-            this.savePlaybackPosition(this.currentTorrent.hash, index, currentTime, isTranscoded);
+            const duration = !isTranscoded && videoPlayer.duration > 0 ? videoPlayer.duration : null;
+            this.savePlaybackPosition(this.currentTorrent.hash, index, currentTime, isTranscoded, duration);
         });
         
-        // Очищаем позицию когда видео досмотрено до конца (последние 30 секунд)
+        // Отслеживаем прогресс просмотра
+        let hasMarkedAsWatched = false; // Флаг чтобы не помечать несколько раз
+        
+        // Получаем реальную длительность видео (для транскодинга используем сохраненную)
+        let videoDuration = null;
+        
         videoPlayer.addEventListener('timeupdate', () => {
-            if (videoPlayer.duration - videoPlayer.currentTime < 30) {
-                this.clearPlaybackPosition(this.currentTorrent.hash, index);
+            // Для прямого потока используем videoPlayer.duration
+            if (!isTranscoded && videoPlayer.duration > 0) {
+                videoDuration = videoPlayer.duration;
+                const progress = videoPlayer.currentTime / videoDuration;
+                
+                // Очищаем позицию когда видео досмотрено до конца (последние 30 секунд)
+                if (videoDuration - videoPlayer.currentTime < 30) {
+                    this.clearPlaybackPosition(this.currentTorrent.hash, index);
+                }
+                
+                // Помечаем как просмотренную при достижении 90%
+                if (progress >= 0.9 && !hasMarkedAsWatched) {
+                    hasMarkedAsWatched = true;
+                    this.markEpisodeAsWatched(this.currentTorrent.hash, index);
+                    console.log(`✅ Episode marked as watched (90% progress): ${fileName}`);
+                }
+            }
+            
+            // Для транскодинга используем сохраненную длительность из localStorage
+            if (isTranscoded) {
+                if (!videoDuration) {
+                    // Пытаемся получить длительность из сохраненных данных
+                    const allPositions = this.loadPlaybackPositions();
+                    const positionKey = `${this.currentTorrent.hash}_${index}`;
+                    
+                    // Если есть сохраненная длительность, используем её
+                    if (allPositions[positionKey] && allPositions[positionKey].duration) {
+                        videoDuration = allPositions[positionKey].duration;
+                        console.log(`📏 Loaded duration from localStorage: ${Math.floor(videoDuration)}s for transcoded video`);
+                    }
+                }
+                
+                // Проверяем прогресс с учетом timeOffset
+                if (videoDuration) {
+                    const realTime = videoPlayer.currentTime + (this.transcodeTimeOffset || 0);
+                    const progress = realTime / videoDuration;
+                    
+                    // Очищаем позицию когда видео досмотрено до конца (последние 30 секунд)
+                    if (videoDuration - realTime < 30) {
+                        this.clearPlaybackPosition(this.currentTorrent.hash, index);
+                    }
+                    
+                    // Помечаем как просмотренную при достижении 90%
+                    if (progress >= 0.9 && !hasMarkedAsWatched) {
+                        hasMarkedAsWatched = true;
+                        this.markEpisodeAsWatched(this.currentTorrent.hash, index);
+                        console.log(`✅ Episode marked as watched (90% progress, transcoded): ${fileName}, realTime: ${Math.floor(realTime)}s / ${Math.floor(videoDuration)}s`);
+                    }
+                } else {
+                    // Если длительности нет, выводим предупреждение раз в 10 секунд
+                    if (Math.floor(videoPlayer.currentTime) % 10 === 0 && Math.floor(videoPlayer.currentTime) !== 0) {
+                        console.warn(`⚠️ No duration available for transcoded video. Cannot calculate 90% progress. Play the video in direct mode first to save duration.`);
+                    }
+                }
             }
         });
         
