@@ -426,14 +426,11 @@ class TorrentApp {
                                         <div class="file-size">${file.sizeFormatted}${isWatched ? ' <i class="fas fa-check-circle" style="color: #4a9eff;"></i>' : ''}</div>
                                     </div>
                                 </div>
-                                <div class="file-actions">
-                                    <button class="file-play-btn" title="Прямой поток">
-                                        <i class="fas fa-play"></i>
-                                    </button>
-                                    <button class="file-transcode-btn" title="Конвертировать аудио в AAC (для Xbox)">
-                                        <i class="fas fa-volume-up"></i>
-                                    </button>
-                                </div>
+                            <div class="file-actions">
+                                <button class="file-play-btn" title="Воспроизвести">
+                                    <i class="fas fa-play"></i>
+                                </button>
+                            </div>
                             </div>
                         `}).join('')}
                     </div>
@@ -442,35 +439,52 @@ class TorrentApp {
 
             // Добавляем обработчики событий для кнопок воспроизведения
             modalBody.querySelectorAll('.file-play-btn').forEach((btn, index) => {
-                btn.addEventListener('click', (e) => {
+                btn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     const item = btn.closest('.file-item');
                     const streamUrl = item.dataset.streamUrl;
                     const m3u8Url = item.dataset.m3u8Url;
-                    const fileName = item.dataset.fileName;
-                    const fileIndex = parseInt(item.dataset.fileIndex);
-                    this.playFile(streamUrl, fileName, fileIndex, m3u8Url, false);
-                });
-            });
-
-            // Добавляем обработчики событий для кнопок транскодирования
-            modalBody.querySelectorAll('.file-transcode-btn').forEach((btn, index) => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const item = btn.closest('.file-item');
                     const transcodeUrl = item.dataset.transcodeUrl;
                     const fileName = item.dataset.fileName;
                     const fileIndex = parseInt(item.dataset.fileIndex);
-                    if (transcodeUrl) {
-                        this.playFile(transcodeUrl, fileName, fileIndex, transcodeUrl, true);
-                    } else {
-                        alert('Транскодирование недоступно для этого файла');
+                    
+                    // Показываем индикатор проверки
+                    const originalHTML = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Проверка...';
+                    btn.disabled = true;
+                    
+                    try {
+                        // Проверяем кодек
+                        const checkUrl = streamUrl.replace('/api/stream/', '/api/check-codec/');
+                        console.log('🔍 Checking codec:', checkUrl);
+                        
+                        const response = await fetch(checkUrl);
+                        const codecInfo = await response.json();
+                        
+                        console.log('📊 Codec info:', codecInfo);
+                        
+                        // Восстанавливаем кнопку
+                        btn.innerHTML = originalHTML;
+                        btn.disabled = false;
+                        
+                        // Решаем нужен ли транскодинг
+                        if (codecInfo.needsTranscode) {
+                            console.log(`🔄 ${codecInfo.reason}, switching to transcode`);
+                            this.playFile(transcodeUrl, fileName, fileIndex, m3u8Url, true);
+                        } else {
+                            console.log(`✅ ${codecInfo.reason}, using direct stream`);
+                            this.playFile(streamUrl, fileName, fileIndex, m3u8Url, false);
+                        }
+                    } catch (error) {
+                        console.error('Codec check failed:', error);
+                        // При ошибке пробуем прямой поток
+                        btn.innerHTML = originalHTML;
+                        btn.disabled = false;
+                        this.playFile(streamUrl, fileName, fileIndex, m3u8Url, false);
                     }
                 });
             });
 
-            // Убрали автоматическое воспроизведение для 1 файла
-            // Теперь пользователь всегда может выбрать между прямым потоком и транскодингом
 
         } catch (error) {
             console.error('Error loading files:', error);
@@ -534,7 +548,9 @@ class TorrentApp {
             console.error('Video error:', e, videoPlayer.error);
             if (videoPlayer.error) {
                 let errorMessage = 'Ошибка воспроизведения: ';
-                switch (videoPlayer.error.code) {
+                const errorCode = videoPlayer.error.code;
+                
+                switch (errorCode) {
                     case 1:
                         errorMessage += 'Загрузка прервана';
                         break;
@@ -551,6 +567,26 @@ class TorrentApp {
                         errorMessage += 'Неизвестная ошибка';
                 }
                 console.error(errorMessage);
+                
+                // Автоматическое переключение на транскодинг при ошибках декодирования или формата
+                if (!isTranscoded && (errorCode === 3 || errorCode === 4)) {
+                    console.log('🔄 Автоматическое переключение на транскодинг...');
+                    
+                    // Получаем transcodeUrl из текущего файла
+                    const currentFile = this.currentTorrent.files[index];
+                    if (currentFile && currentFile.transcodeUrl) {
+                        // Показываем уведомление
+                        const modalTitle = document.getElementById('modalTitle');
+                        modalTitle.textContent = `${this.currentTorrent.title} - ${fileName} 🔄 Переключение на транскодинг...`;
+                        
+                        // Перезапускаем с транскодингом
+                        setTimeout(() => {
+                            this.playFile(currentFile.transcodeUrl, fileName, index, m3u8Url, true);
+                        }, 1000);
+                    } else {
+                        console.error('❌ TranscodeUrl not available');
+                    }
+                }
             }
         };
 

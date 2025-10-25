@@ -329,6 +329,103 @@ app.get('/api/transcode/:filename?', async (req, res) => {
   }
 });
 
+// Check audio codec compatibility endpoint
+app.get('/api/check-codec/:filename?', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const hash = req.query.link;
+    const index = req.query.index;
+    
+    if (!hash) {
+      return res.status(400).json({ error: 'Missing link parameter' });
+    }
+    
+    // Формируем URL к потоку torrServer
+    const queryString = Object.keys(req.query)
+      .map(key => {
+        const value = req.query[key];
+        return value !== '' && value !== undefined ? `${key}=${value}` : key;
+      })
+      .join('&');
+    
+    const streamPath = filename ? `/${filename}` : '';
+    const streamUrl = `http://217.144.98.80:8090/stream${streamPath}${queryString ? '?' + queryString : ''}`;
+    
+    console.log('🔍 Checking codec for:', streamUrl);
+    
+    // Используем ffprobe для анализа потока
+    const ffprobe = spawn('ffprobe', [
+      '-headers', `Authorization: Basic ${Buffer.from('user1:test123').toString('base64')}`,
+      '-v', 'quiet',
+      '-print_format', 'json',
+      '-show_streams',
+      '-analyzeduration', '5000000', // 5 секунд анализа
+      '-probesize', '5000000',
+      streamUrl
+    ]);
+    
+    let output = '';
+    let errorOutput = '';
+    
+    ffprobe.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    ffprobe.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    ffprobe.on('close', (code) => {
+      if (code !== 0) {
+        console.error('FFprobe error:', errorOutput);
+        return res.status(500).json({ 
+          error: 'Failed to probe stream',
+          needsTranscode: true // На всякий случай включаем транскодинг
+        });
+      }
+      
+      try {
+        const probeData = JSON.parse(output);
+        const audioStream = probeData.streams?.find(s => s.codec_type === 'audio');
+        
+        if (!audioStream) {
+          console.log('⚠️ No audio stream found');
+          return res.json({
+            hasAudio: false,
+            needsTranscode: true,
+            reason: 'No audio stream'
+          });
+        }
+        
+        const audioCodec = audioStream.codec_name;
+        const isCompatible = audioCodec === 'aac' || audioCodec === 'mp3';
+        
+        console.log(`🎵 Audio codec: ${audioCodec}, compatible: ${isCompatible}`);
+        
+        res.json({
+          hasAudio: true,
+          audioCodec: audioCodec,
+          needsTranscode: !isCompatible,
+          reason: isCompatible ? 'Compatible codec' : `Incompatible codec: ${audioCodec}`
+        });
+      } catch (parseError) {
+        console.error('Failed to parse ffprobe output:', parseError);
+        res.status(500).json({ 
+          error: 'Failed to parse probe data',
+          needsTranscode: true
+        });
+      }
+    });
+    
+  } catch (error) {
+    console.error('Codec check error:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to check codec',
+      needsTranscode: true
+    });
+  }
+});
+
 // Serve main page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
