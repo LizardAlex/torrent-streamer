@@ -535,6 +535,107 @@ class TorrentApp {
                 this.playNextEpisode();
             });
         }
+
+        // Если транскодинг - добавляем контролы перемотки
+        if (isTranscoded) {
+            this.addTranscodeControls(videoPlayer, streamUrl);
+        }
+    }
+
+    addTranscodeControls(videoPlayer, baseStreamUrl) {
+        console.log('🎬 Adding transcode controls');
+        
+        let timeOffset = 0; // Смещение времени после перемотки
+        
+        const videoContainer = videoPlayer.parentElement;
+        videoContainer.style.position = 'relative';
+        
+        // 1. Индикатор времени в правом верхнем углу
+        const timeOverlay = document.createElement('div');
+        timeOverlay.className = 'time-overlay';
+        timeOverlay.textContent = '0:00';
+        videoContainer.appendChild(timeOverlay);
+        
+        // Обновляем индикатор времени
+        videoPlayer.addEventListener('timeupdate', () => {
+            const currentTime = videoPlayer.currentTime;
+            const realTime = Math.floor(currentTime + timeOffset);
+            const hours = Math.floor(realTime / 3600);
+            const minutes = Math.floor((realTime % 3600) / 60);
+            const seconds = realTime % 60;
+            
+            const timeString = hours > 0 
+                ? `${hours}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`
+                : `${minutes}:${seconds.toString().padStart(2,'0')}`;
+            
+            timeOverlay.textContent = timeString;
+            
+            // Отладка (показываем раз в 5 секунд)
+            if (Math.floor(currentTime) % 5 === 0 && Math.floor(currentTime) !== 0) {
+                console.log(`⏱️ currentTime: ${Math.floor(currentTime)}s, timeOffset: ${timeOffset}s, realTime: ${realTime}s (${timeString})`);
+            }
+        });
+        
+        // 2. Контролы перемотки под видео
+        const seekControls = document.createElement('div');
+        seekControls.className = 'transcode-seek-controls';
+        seekControls.innerHTML = `
+            <div class="seek-input-wrapper">
+                <label for="seekMinutesInput">Перейти на минуту:</label>
+                <input type="number" id="seekMinutesInput" min="0" step="1" placeholder="0" />
+                <button class="seek-go-button">
+                    <i class="fas fa-play"></i> Перейти
+                </button>
+            </div>
+        `;
+        
+        videoContainer.appendChild(seekControls);
+        
+        // Обработчик кнопки перехода
+        const seekButton = seekControls.querySelector('.seek-go-button');
+        const seekInput = seekControls.querySelector('#seekMinutesInput');
+        
+        const performSeek = () => {
+            const minutes = parseInt(seekInput.value) || 0;
+            const seekTime = minutes * 60;
+            
+            console.log(`🎯 Seeking to ${minutes} min (${seekTime}s)`);
+            
+            // Формируем новый URL с параметром seek
+            const baseUrl = baseStreamUrl.split('?')[0];
+            const params = new URLSearchParams(baseStreamUrl.split('?')[1] || '');
+            params.set('seek', seekTime.toString());
+            const newUrl = `${baseUrl}?${params.toString()}`;
+            
+            console.log(`📡 New URL: ${newUrl}`);
+            console.log(`⏰ Setting timeOffset to ${seekTime}s (${minutes} min)`);
+            
+            // Показываем загрузку
+            videoPlayer.style.opacity = '0.5';
+            
+            // Перезагружаем поток
+            videoPlayer.src = newUrl;
+            videoPlayer.load();
+            
+            // ВАЖНО: Обновляем offset ПОСЛЕ установки src
+            timeOffset = seekTime;
+            
+            videoPlayer.onloadeddata = () => {
+                console.log(`✅ Loaded from ${minutes} min, timeOffset = ${timeOffset}s`);
+                videoPlayer.style.opacity = '1';
+                videoPlayer.play().catch(err => console.log('Play error:', err));
+                videoPlayer.onloadeddata = null;
+            };
+        };
+        
+        seekButton.addEventListener('click', performSeek);
+        
+        // Enter в поле = переход
+        seekInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSeek();
+            }
+        });
     }
 
     playPreviousEpisode() {

@@ -224,8 +224,12 @@ app.get('/api/transcode/:filename?', async (req, res) => {
       torrServerClient.registerTorrentActivity(hash, 'transcoding');
     }
     
-    // Формируем URL к оригинальному потоку torrServer
+    // Извлекаем параметр seek (если есть)
+    const seekTime = parseInt(req.query.seek) || 0;
+    
+    // Формируем URL к оригинальному потоку torrServer (БЕЗ параметра seek)
     const queryString = Object.keys(req.query)
+      .filter(key => key !== 'seek') // Убираем seek из URL для torrServer
       .map(key => {
         const value = req.query[key];
         return value !== '' && value !== undefined ? `${key}=${value}` : key;
@@ -235,13 +239,18 @@ app.get('/api/transcode/:filename?', async (req, res) => {
     const streamPath = filename ? `/${filename}` : '';
     const streamUrl = `http://217.144.98.80:8090/stream${streamPath}${queryString ? '?' + queryString : ''}`;
     
-    console.log('🎵 Starting FFmpeg audio-only transcoding (video copy) for:', streamUrl);
+    if (seekTime > 0) {
+      console.log(`🎵 Starting FFmpeg audio-only transcoding from ${seekTime}s (${Math.floor(seekTime/60)}:${(seekTime%60).toString().padStart(2,'0')}) for:`, streamUrl);
+    } else {
+      console.log('🎵 Starting FFmpeg audio-only transcoding (video copy) for:', streamUrl);
+    }
     
     // Настройка заголовков для видео потока (Matroska/MKV)
     res.setHeader('Content-Type', 'video/x-matroska');
     res.setHeader('Transfer-Encoding', 'chunked');
     
     // FFmpeg команда для транскодинга ТОЛЬКО АУДИО (видео копируется без изменений)
+    // -ss: начальная позиция (ПЕРЕД -i для быстрого seek)
     // -i: входной URL с Basic Auth
     // -c:v copy: КОПИРОВАТЬ видео без перекодирования (быстро, нет нагрузки)
     // -c:a aac: AAC кодек для аудио (универсальная совместимость с Xbox)
@@ -251,6 +260,14 @@ app.get('/api/transcode/:filename?', async (req, res) => {
     // pipe:1: вывод в stdout
     const ffmpegArgs = [
       '-headers', `Authorization: Basic ${Buffer.from('user1:test123').toString('base64')}`,
+    ];
+    
+    // Добавляем -ss ПЕРЕД -i для быстрого seek (input seeking)
+    if (seekTime > 0) {
+      ffmpegArgs.push('-ss', seekTime.toString());
+    }
+    
+    ffmpegArgs.push(
       '-i', streamUrl,
       '-c:v', 'copy',           // Копируем видео как есть (без перекодирования)
       '-c:a', 'aac',            // Перекодируем аудио в AAC
@@ -258,7 +275,7 @@ app.get('/api/transcode/:filename?', async (req, res) => {
       '-ac', '2',               // Стерео
       '-f', 'matroska',         // MKV контейнер (работает через pipe)
       'pipe:1'
-    ];
+    );
     
     console.log('FFmpeg command:', 'ffmpeg', ffmpegArgs.join(' '));
     
