@@ -8,7 +8,7 @@ const torrentParser = require('./src/torrentParser');
 const torrServerClient = require('./src/torrServerClient');
 
 const app = express();
-const PORT = process.env.PORT || 3001; // Используем порт, который браузер точно не кешировал
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(helmet({
