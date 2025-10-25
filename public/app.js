@@ -87,6 +87,74 @@ class TorrentApp {
         return watchedEpisodes[torrentHash] && watchedEpisodes[torrentHash].includes(episodeIndex);
     }
 
+    // Функции для работы с позициями воспроизведения
+    loadPlaybackPositions() {
+        try {
+            const data = localStorage.getItem('playback_positions');
+            return data ? JSON.parse(data) : {};
+        } catch (error) {
+            console.error('Error loading playback positions:', error);
+            return {};
+        }
+    }
+
+    savePlaybackPosition(torrentHash, episodeIndex, currentTime, isTranscoded = false) {
+        try {
+            const positions = this.loadPlaybackPositions();
+            const key = `${torrentHash}_${episodeIndex}`;
+            
+            // Сохраняем позицию только если прошло больше 5 секунд
+            if (currentTime > 5) {
+                positions[key] = {
+                    time: Math.floor(currentTime),
+                    isTranscoded: isTranscoded,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem('playback_positions', JSON.stringify(positions));
+                console.log(`💾 Saved position: ${Math.floor(currentTime)}s for ${key}`);
+            }
+        } catch (error) {
+            console.error('Error saving playback position:', error);
+        }
+    }
+
+    getPlaybackPosition(torrentHash, episodeIndex) {
+        try {
+            const positions = this.loadPlaybackPositions();
+            const key = `${torrentHash}_${episodeIndex}`;
+            const position = positions[key];
+            
+            if (position) {
+                // Удаляем старые позиции (старше 30 дней)
+                const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+                if (position.timestamp < thirtyDaysAgo) {
+                    delete positions[key];
+                    localStorage.setItem('playback_positions', JSON.stringify(positions));
+                    return null;
+                }
+                
+                console.log(`📍 Found saved position: ${position.time}s for ${key}`);
+                return position;
+            }
+            return null;
+        } catch (error) {
+            console.error('Error getting playback position:', error);
+            return null;
+        }
+    }
+
+    clearPlaybackPosition(torrentHash, episodeIndex) {
+        try {
+            const positions = this.loadPlaybackPositions();
+            const key = `${torrentHash}_${episodeIndex}`;
+            delete positions[key];
+            localStorage.setItem('playback_positions', JSON.stringify(positions));
+            console.log(`🗑️ Cleared position for ${key}`);
+        } catch (error) {
+            console.error('Error clearing playback position:', error);
+        }
+    }
+
     addToRecentlyWatched(torrent) {
         const magnetLink = torrent.magnetLink || torrent.link;
         // Удаляем дубликат если есть
@@ -535,13 +603,70 @@ class TorrentApp {
 
         const videoPlayer = document.getElementById('videoPlayer');
         
+        // Проверяем сохраненную позицию воспроизведения
+        const savedPosition = this.getPlaybackPosition(this.currentTorrent.hash, index);
+        let startFromPosition = 0;
+        
+        if (savedPosition && !isTranscoded) {
+            // Для прямого потока используем встроенный механизм
+            startFromPosition = savedPosition.time;
+            console.log(`⏩ Resuming from saved position: ${startFromPosition}s`);
+        } else if (savedPosition && isTranscoded) {
+            // Для транскодинга добавляем параметр seek в URL
+            const baseUrl = streamUrl.split('?')[0];
+            const params = new URLSearchParams(streamUrl.split('?')[1] || '');
+            params.set('seek', savedPosition.time.toString());
+            streamUrl = `${baseUrl}?${params.toString()}`;
+            console.log(`⏩ Resuming transcoded stream from: ${savedPosition.time}s`);
+        }
+        
         // Используем ТОЛЬКО прямое воспроизведение, т.к. torrServer возвращает M3U (не M3U8)
         // HLS.js не работает с M3U плейлистами от torrServer
         console.log('Using direct video streaming via proxy');
         videoPlayer.src = streamUrl;
+        
+        // Устанавливаем позицию для прямого потока
+        if (startFromPosition > 0 && !isTranscoded) {
+            videoPlayer.currentTime = startFromPosition;
+        }
+        
         videoPlayer.play().catch(error => {
             console.log('Autoplay prevented:', error);
         });
+        
+        // Периодически сохраняем позицию воспроизведения (каждые 10 секунд)
+        let savePositionInterval = setInterval(() => {
+            if (videoPlayer && !videoPlayer.paused && !videoPlayer.ended) {
+                const currentTime = isTranscoded ? 
+                    (videoPlayer.currentTime + (this.transcodeTimeOffset || 0)) : 
+                    videoPlayer.currentTime;
+                this.savePlaybackPosition(this.currentTorrent.hash, index, currentTime, isTranscoded);
+            }
+        }, 10000);
+        
+        // Сохраняем позицию при паузе
+        videoPlayer.addEventListener('pause', () => {
+            const currentTime = isTranscoded ? 
+                (videoPlayer.currentTime + (this.transcodeTimeOffset || 0)) : 
+                videoPlayer.currentTime;
+            this.savePlaybackPosition(this.currentTorrent.hash, index, currentTime, isTranscoded);
+        });
+        
+        // Очищаем позицию когда видео досмотрено до конца (последние 30 секунд)
+        videoPlayer.addEventListener('timeupdate', () => {
+            if (videoPlayer.duration - videoPlayer.currentTime < 30) {
+                this.clearPlaybackPosition(this.currentTorrent.hash, index);
+            }
+        });
+        
+        // Очищаем интервал при закрытии
+        videoPlayer.addEventListener('ended', () => {
+            clearInterval(savePositionInterval);
+            this.clearPlaybackPosition(this.currentTorrent.hash, index);
+        });
+        
+        // Сохраняем ссылку на интервал для очистки
+        this.savePositionInterval = savePositionInterval;
         
         // Обработчики событий для отладки
         videoPlayer.onerror = (e) => {
@@ -621,7 +746,10 @@ class TorrentApp {
     addTranscodeControls(videoPlayer, baseStreamUrl) {
         console.log('🎬 Adding transcode controls');
         
-        let timeOffset = 0; // Смещение времени после перемотки
+        // Проверяем сохраненную позицию для установки начального offset
+        const savedPosition = this.getPlaybackPosition(this.currentTorrent.hash, this.currentFileIndex);
+        let timeOffset = savedPosition ? savedPosition.time : 0;
+        this.transcodeTimeOffset = timeOffset; // Сохраняем в this для доступа из других функций
         
         const videoContainer = videoPlayer.parentElement;
         videoContainer.style.position = 'relative';
@@ -695,6 +823,7 @@ class TorrentApp {
             
             // ВАЖНО: Обновляем offset ПОСЛЕ установки src
             timeOffset = seekTime;
+            this.transcodeTimeOffset = timeOffset; // Обновляем в this
             
             videoPlayer.onloadeddata = () => {
                 console.log(`✅ Loaded from ${minutes} min, timeOffset = ${timeOffset}s`);
@@ -784,9 +913,19 @@ class TorrentApp {
         const modalOverlay = document.getElementById('modalOverlay');
         const modalBody = document.getElementById('modalBody');
         
-        // Останавливаем видео
+        // Очищаем интервал сохранения позиции
+        if (this.savePositionInterval) {
+            clearInterval(this.savePositionInterval);
+            this.savePositionInterval = null;
+        }
+        
+        // Останавливаем видео и сохраняем последнюю позицию
         const videoPlayer = document.getElementById('videoPlayer');
-        if (videoPlayer) {
+        if (videoPlayer && this.currentTorrent) {
+            const currentTime = this.currentIsTranscoded ? 
+                (videoPlayer.currentTime + (this.transcodeTimeOffset || 0)) : 
+                videoPlayer.currentTime;
+            this.savePlaybackPosition(this.currentTorrent.hash, this.currentFileIndex, currentTime, this.currentIsTranscoded);
             videoPlayer.pause();
             videoPlayer.onerror = null; // Удаляем обработчик ошибок перед очисткой src
             videoPlayer.src = '';
