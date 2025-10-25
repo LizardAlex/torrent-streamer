@@ -320,7 +320,9 @@ class TorrServerClient {
         // Используем параметр play как флаг (без значения)
         streamUrl: `/api/stream/video?link=${hashLower}&index=${fileId}&play`,
         m3u8Url: `/api/stream/video?link=${hashLower}&index=${fileId}&m3u`,
-        preloadUrl: `/api/stream/video?link=${hashLower}&index=${fileId}&preload`
+        preloadUrl: `/api/stream/video?link=${hashLower}&index=${fileId}&preload`,
+        // FFmpeg транскодированный URL для Xbox совместимости
+        transcodeUrl: `/api/transcode/video?link=${hashLower}&index=${fileId}&play`
       };
     });
     
@@ -396,7 +398,9 @@ class TorrServerClient {
         // Используем прокси через наш сервер
         streamUrl: `/api/stream/video?link=${hashLower}&index=${i}&play`,
         m3u8Url: `/api/stream/video?link=${hashLower}&index=${i}&m3u`,
-        preloadUrl: `/api/stream/video?link=${hashLower}&index=${i}&preload`
+        preloadUrl: `/api/stream/video?link=${hashLower}&index=${i}&preload`,
+        // FFmpeg транскодированный URL для Xbox совместимости
+        transcodeUrl: `/api/transcode/video?link=${hashLower}&index=${i}&play`
       });
     }
     

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const { spawn } = require('child_process');
 require('dotenv').config();
 
 const torrentParser = require('./src/torrentParser');
@@ -209,6 +210,107 @@ app.get('/api/stream/:filename(*)', async (req, res) => {
       console.error('Response data (first 500 chars):', error.response.data ? error.response.data.toString().substring(0, 500) : 'N/A');
     }
     res.status(500).json({ error: 'Failed to proxy stream: ' + error.message });
+  }
+});
+
+// FFmpeg transcoding endpoint for Xbox compatibility with seeking support
+app.get('/api/transcode/:filename?', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    
+    // Извлекаем hash из query параметров для отслеживания активности
+    const hash = req.query.link;
+    if (hash) {
+      torrServerClient.registerTorrentActivity(hash, 'transcoding');
+    }
+    
+    // Формируем URL к оригинальному потоку torrServer
+    const queryString = Object.keys(req.query)
+      .map(key => {
+        const value = req.query[key];
+        return value !== '' && value !== undefined ? `${key}=${value}` : key;
+      })
+      .join('&');
+    
+    const streamPath = filename ? `/${filename}` : '';
+    const streamUrl = `http://217.144.98.80:8090/stream${streamPath}${queryString ? '?' + queryString : ''}`;
+    
+    console.log('🎵 Starting FFmpeg audio-only transcoding (video copy) for:', streamUrl);
+    
+    // Настройка заголовков для видео потока (Matroska/MKV)
+    res.setHeader('Content-Type', 'video/x-matroska');
+    res.setHeader('Accept-Ranges', 'none'); // MKV через pipe не поддерживает Range
+    res.setHeader('Transfer-Encoding', 'chunked');
+    
+    // FFmpeg команда для транскодинга ТОЛЬКО АУДИО (видео копируется без изменений)
+    // -ss: seek to position (ПЕРЕМОТКА!)
+    // -i: входной URL с Basic Auth
+    // -c:v copy: КОПИРОВАТЬ видео без перекодирования (быстро, нет нагрузки)
+    // -c:a aac: AAC кодек для аудио (универсальная совместимость с Xbox)
+    // -b:a 128k: битрейт аудио 128 kbps
+    // -ac 2: стерео (2 канала)
+    // -f matroska: контейнер MKV (лучше работает через pipe для streaming)
+    // pipe:1: вывод в stdout
+    const ffmpegArgs = [
+      '-headers', `Authorization: Basic ${Buffer.from('user1:test123').toString('base64')}`,
+      '-i', streamUrl,
+      '-c:v', 'copy',           // Копируем видео как есть (без перекодирования)
+      '-c:a', 'aac',            // Перекодируем аудио в AAC
+      '-b:a', '128k',           // Битрейт аудио
+      '-ac', '2',               // Стерео
+      '-f', 'matroska',         // MKV контейнер (работает через pipe)
+      'pipe:1'
+    ];
+    
+    console.log('FFmpeg command:', 'ffmpeg', ffmpegArgs.join(' '));
+    
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+    
+    // Пробрасываем транскодированный поток в ответ
+    ffmpeg.stdout.pipe(res);
+    
+    // Логируем stderr FFmpeg (прогресс, ошибки)
+    ffmpeg.stderr.on('data', (data) => {
+      const message = data.toString();
+      // Фильтруем слишком многословный вывод FFmpeg
+      if (message.includes('frame=') || message.includes('time=')) {
+        // Логируем только каждую 10-ю строку прогресса
+        if (Math.random() < 0.1) {
+          console.log('FFmpeg progress:', message.split('\n')[0]);
+        }
+      } else {
+        console.log('FFmpeg:', message);
+      }
+    });
+    
+    // Обрабатываем закрытие соединения клиентом
+    req.on('close', () => {
+      console.log('Client disconnected, killing FFmpeg process');
+      ffmpeg.kill('SIGKILL');
+    });
+    
+    // Обрабатываем завершение FFmpeg
+    ffmpeg.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        console.error(`FFmpeg process exited with code ${code}`);
+      } else {
+        console.log('FFmpeg transcoding finished successfully');
+      }
+    });
+    
+    // Обрабатываем ошибки FFmpeg
+    ffmpeg.on('error', (err) => {
+      console.error('FFmpeg spawn error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to start transcoding' });
+      }
+    });
+    
+  } catch (error) {
+    console.error('Transcode error:', error.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to transcode: ' + error.message });
+    }
   }
 });
 

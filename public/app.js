@@ -378,7 +378,7 @@ class TorrentApp {
                     </div>
                     <div class="file-list">
                         ${data.files.map((file, index) => `
-                            <div class="file-item" data-stream-url="${file.streamUrl}" data-m3u8-url="${file.m3u8Url || file.streamUrl}" data-file-name="${this.escapeHtml(file.name)}" data-file-index="${index}">
+                            <div class="file-item" data-stream-url="${file.streamUrl}" data-m3u8-url="${file.m3u8Url || file.streamUrl}" data-transcode-url="${file.transcodeUrl || ''}" data-file-name="${this.escapeHtml(file.name)}" data-file-index="${index}">
                                 <div class="file-info">
                                     <div class="file-number">${index + 1}</div>
                                     <div class="file-details">
@@ -386,29 +386,52 @@ class TorrentApp {
                                         <div class="file-size">${file.sizeFormatted}</div>
                                     </div>
                                 </div>
-                                <button class="file-play-btn">
-                                    <i class="fas fa-play"></i>
-                                </button>
+                                <div class="file-actions">
+                                    <button class="file-play-btn" title="Прямой поток">
+                                        <i class="fas fa-play"></i>
+                                    </button>
+                                    <button class="file-transcode-btn" title="Конвертировать аудио в AAC (для Xbox)">
+                                        <i class="fas fa-volume-up"></i>
+                                    </button>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
                 </div>
             `;
 
-            // Добавляем обработчики событий для файлов
-            modalBody.querySelectorAll('.file-item').forEach(item => {
-                item.addEventListener('click', () => {
+            // Добавляем обработчики событий для кнопок воспроизведения
+            modalBody.querySelectorAll('.file-play-btn').forEach((btn, index) => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const item = btn.closest('.file-item');
                     const streamUrl = item.dataset.streamUrl;
                     const m3u8Url = item.dataset.m3u8Url;
                     const fileName = item.dataset.fileName;
                     const fileIndex = parseInt(item.dataset.fileIndex);
-                    this.playFile(streamUrl, fileName, fileIndex, m3u8Url);
+                    this.playFile(streamUrl, fileName, fileIndex, m3u8Url, false);
+                });
+            });
+
+            // Добавляем обработчики событий для кнопок транскодирования
+            modalBody.querySelectorAll('.file-transcode-btn').forEach((btn, index) => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const item = btn.closest('.file-item');
+                    const transcodeUrl = item.dataset.transcodeUrl;
+                    const fileName = item.dataset.fileName;
+                    const fileIndex = parseInt(item.dataset.fileIndex);
+                    if (transcodeUrl) {
+                        this.playFile(transcodeUrl, fileName, fileIndex, transcodeUrl, true);
+                    } else {
+                        alert('Транскодирование недоступно для этого файла');
+                    }
                 });
             });
 
             // Если только один файл, автоматически начинаем воспроизведение
             if (data.files.length === 1) {
-                setTimeout(() => this.playFile(data.files[0].streamUrl, data.files[0].name, 0, data.files[0].m3u8Url), 500);
+                setTimeout(() => this.playFile(data.files[0].streamUrl, data.files[0].name, 0, data.files[0].m3u8Url, false), 500);
             }
 
         } catch (error) {
@@ -417,16 +440,17 @@ class TorrentApp {
         }
     }
 
-    playFile(streamUrl, fileName, index, m3u8Url) {
+    playFile(streamUrl, fileName, index, m3u8Url, isTranscoded = false) {
         const modalBody = document.getElementById('modalBody');
         const modalTitle = document.getElementById('modalTitle');
 
-        console.log('Playing file:', fileName, streamUrl);
+        console.log('Playing file:', fileName, streamUrl, isTranscoded ? '(TRANSCODED)' : '(DIRECT)');
         console.log('M3U8 URL:', m3u8Url);
 
         this.currentStreamUrl = streamUrl;
         this.currentFileIndex = index; // Сохраняем текущий индекс
-        modalTitle.textContent = `${this.currentTorrent.title} - ${fileName}`;
+        this.currentIsTranscoded = isTranscoded; // Сохраняем режим
+        modalTitle.textContent = `${this.currentTorrent.title} - ${fileName}${isTranscoded ? ' 🎵' : ''}`;
 
         // Уничтожаем предыдущий HLS экземпляр если есть
         if (this.hls) {
@@ -528,8 +552,9 @@ class TorrentApp {
             const prevFile = this.currentTorrent.files[prevIndex];
             console.log(`Playing previous episode: ${prevFile.name}`);
             
-            // Воспроизводим предыдущую серию
-            this.playFile(prevFile.streamUrl, prevFile.name, prevIndex, prevFile.m3u8Url);
+            // Воспроизводим предыдущую серию в том же режиме (транскодирование или прямой поток)
+            const url = this.currentIsTranscoded ? prevFile.transcodeUrl : prevFile.streamUrl;
+            this.playFile(url, prevFile.name, prevIndex, prevFile.m3u8Url, this.currentIsTranscoded);
         } else {
             console.log('This is the first episode');
         }
@@ -548,8 +573,9 @@ class TorrentApp {
             const nextFile = this.currentTorrent.files[nextIndex];
             console.log(`Auto-playing next episode: ${nextFile.name}`);
             
-            // Воспроизводим следующую серию
-            this.playFile(nextFile.streamUrl, nextFile.name, nextIndex, nextFile.m3u8Url);
+            // Воспроизводим следующую серию в том же режиме (транскодирование или прямой поток)
+            const url = this.currentIsTranscoded ? nextFile.transcodeUrl : nextFile.streamUrl;
+            this.playFile(url, nextFile.name, nextIndex, nextFile.m3u8Url, this.currentIsTranscoded);
         } else {
             console.log('No more episodes, this was the last one');
             
