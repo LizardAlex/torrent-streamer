@@ -8,7 +8,7 @@ const torrentParser = require('./src/torrentParser');
 const torrServerClient = require('./src/torrServerClient');
 
 const app = express();
-const PORT = process.env.PORT || 444;
+const PORT = process.env.PORT || 8080; // Используем обычный HTTP-порт
 
 // Middleware
 app.use(helmet({
@@ -19,10 +19,15 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
       fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      mediaSrc: ["'self'", "http://217.144.98.80:8090", "blob:"], // Разрешаем загрузку медиа с torrServer
-      connectSrc: ["'self'", "http://217.144.98.80:8090", "https://cdn.jsdelivr.net"] // Разрешаем подключения к torrServer и cdn.jsdelivr.net
+      mediaSrc: ["'self'", "http://217.144.98.80:8090", "blob:"],
+      connectSrc: ["'self'", "http://217.144.98.80:8090", "https://cdn.jsdelivr.net"],
+      formAction: ["'self'"] // Разрешаем отправку форм только на свой сервер
     }
-  }
+  },
+  // Отключаем проблемные заголовки для HTTP
+  crossOriginOpenerPolicy: false,
+  crossOriginResourcePolicy: false,
+  originAgentCluster: false
 }));
 app.use(cors());
 app.use(express.json());
