@@ -12,19 +12,7 @@ const PORT = process.env.PORT || 3001; // Используем порт, кот�
 
 // Middleware
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-      fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
-      imgSrc: ["'self'", "data:", "https:"],
-      mediaSrc: ["'self'", "http://217.144.98.80:8090", "blob:"],
-      connectSrc: ["'self'", "http://217.144.98.80:8090", "https://cdn.jsdelivr.net"],
-      formAction: ["'self'"] // Разрешаем отправку форм только на свой сервер
-    }
-  },
-  // Отключаем проблемные заголовки для HTTP
+  contentSecurityPolicy: false, // Отключаем CSP полностью для HTTP-сервера
   crossOriginOpenerPolicy: false,
   crossOriginResourcePolicy: false,
   originAgentCluster: false
