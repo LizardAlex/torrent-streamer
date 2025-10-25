@@ -429,10 +429,8 @@ class TorrentApp {
                 });
             });
 
-            // Если только один файл, автоматически начинаем воспроизведение
-            if (data.files.length === 1) {
-                setTimeout(() => this.playFile(data.files[0].streamUrl, data.files[0].name, 0, data.files[0].m3u8Url, false), 500);
-            }
+            // Убрали автоматическое воспроизведение для 1 файла
+            // Теперь пользователь всегда может выбрать между прямым потоком и транскодингом
 
         } catch (error) {
             console.error('Error loading files:', error);

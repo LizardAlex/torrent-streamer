@@ -239,17 +239,15 @@ app.get('/api/transcode/:filename?', async (req, res) => {
     
     // Настройка заголовков для видео потока (Matroska/MKV)
     res.setHeader('Content-Type', 'video/x-matroska');
-    res.setHeader('Accept-Ranges', 'none'); // MKV через pipe не поддерживает Range
     res.setHeader('Transfer-Encoding', 'chunked');
     
     // FFmpeg команда для транскодинга ТОЛЬКО АУДИО (видео копируется без изменений)
-    // -ss: seek to position (ПЕРЕМОТКА!)
     // -i: входной URL с Basic Auth
     // -c:v copy: КОПИРОВАТЬ видео без перекодирования (быстро, нет нагрузки)
     // -c:a aac: AAC кодек для аудио (универсальная совместимость с Xbox)
     // -b:a 128k: битрейт аудио 128 kbps
     // -ac 2: стерео (2 канала)
-    // -f matroska: контейнер MKV (лучше работает через pipe для streaming)
+    // -f matroska: контейнер MKV (работает через pipe для streaming)
     // pipe:1: вывод в stdout
     const ffmpegArgs = [
       '-headers', `Authorization: Basic ${Buffer.from('user1:test123').toString('base64')}`,
