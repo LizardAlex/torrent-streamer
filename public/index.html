@@ -757,6 +757,9 @@
                 <button class="tab-btn" data-tab="favorites">
                     <i class="fas fa-heart"></i> Мои торренты
                 </button>
+                <button class="tab-btn" data-tab="external">
+                    <i class="fas fa-link"></i> Внешние торренты
+                </button>
             </div>
 
             <!-- Результаты поиска -->
@@ -785,6 +788,46 @@
                 </div>
                 <div id="favoritesList"></div>
             </div>
+
+            <!-- Внешние торренты -->
+            <div class="tab-content" id="externalTab">
+                <div class="results-header">
+                    <h2>Внешние торренты</h2>
+                    <div class="results-count" id="externalCount"></div>
+                </div>
+                
+                <!-- Форма добавления внешнего торрента -->
+                <div class="external-torrent-form" style="background: #1a1a1a; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #333;">
+                    <h3 style="margin-top: 0; margin-bottom: 15px; color: #fff;">
+                        <i class="fas fa-plus-circle"></i> Добавить magnet-ссылку
+                    </h3>
+                    <form id="addExternalTorrentForm" style="display: flex; flex-direction: column; gap: 15px;">
+                        <input 
+                            type="text" 
+                            id="externalTorrentTitle" 
+                            placeholder="Название торрента" 
+                            required
+                            style="padding: 12px; border: 2px solid #333; border-radius: 8px; background: #0a0a0a; color: #fff; font-size: 1rem;"
+                        >
+                        <input 
+                            type="text" 
+                            id="externalTorrentMagnet" 
+                            placeholder="magnet:?xt=urn:btih:..." 
+                            required
+                            style="padding: 12px; border: 2px solid #333; border-radius: 8px; background: #0a0a0a; color: #fff; font-size: 1rem;"
+                        >
+                        <button 
+                            type="submit" 
+                            style="padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; transition: transform 0.2s;"
+                        >
+                            <i class="fas fa-plus"></i> Добавить торрент
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Список внешних торрентов -->
+                <div id="externalList"></div>
+            </div>
         </div>
     </div>
 
@@ -803,6 +846,6 @@
         </div>
     </div>
 
-    <script src="/app.js?v=1761429500"></script>
+    <script src="/app.js?v=1761430000"></script>
 </body>
 </html>

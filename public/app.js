@@ -238,6 +238,11 @@ class TorrentApp {
         // Добавляем активный класс к выбранной кнопке и контенту
         document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
         document.getElementById(`${tabName}Tab`).classList.add('active');
+
+        // Загружаем внешние торренты при переключении на вкладку
+        if (tabName === 'external') {
+            this.loadExternalTorrents();
+        }
     }
 
     initializeEventListeners() {
@@ -254,6 +259,16 @@ class TorrentApp {
         document.getElementById('modalOverlay').addEventListener('click', (e) => {
             if (e.target.id === 'modalOverlay') {
                 this.closeModal();
+            }
+        });
+
+        // Обработчик формы добавления внешнего торрента
+        document.getElementById('addExternalTorrentForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const title = document.getElementById('externalTorrentTitle').value.trim();
+            const magnetLink = document.getElementById('externalTorrentMagnet').value.trim();
+            if (title && magnetLink) {
+                this.addExternalTorrent(title, magnetLink);
             }
         });
     }
@@ -1064,6 +1079,138 @@ class TorrentApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // Функции для работы с внешними торрентами
+    async loadExternalTorrents() {
+        try {
+            const response = await fetch('/api/external-torrents');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const torrents = await response.json();
+            this.renderExternalTorrents(torrents);
+        } catch (error) {
+            console.error('Failed to load external torrents:', error);
+            document.getElementById('externalList').innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <p>Ошибка загрузки внешних торрентов</p>
+                </div>
+            `;
+        }
+    }
+
+    renderExternalTorrents(torrents) {
+        const externalList = document.getElementById('externalList');
+        const externalCount = document.getElementById('externalCount');
+        
+        externalCount.textContent = `${torrents.length} ${this.getTorrentWord(torrents.length)}`;
+
+        if (torrents.length === 0) {
+            externalList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-link"></i>
+                    <p>Нет добавленных внешних торрентов</p>
+                    <p style="font-size: 0.9rem; color: #666;">Используйте форму выше, чтобы добавить magnet-ссылку</p>
+                </div>
+            `;
+            return;
+        }
+
+        externalList.innerHTML = torrents.map(torrent => `
+            <div class="result-item" data-external-id="${torrent.id}">
+                <div class="result-info">
+                    <div class="result-title">${this.escapeHtml(torrent.title)}</div>
+                    <div class="result-meta">
+                        <span><i class="fas fa-calendar"></i> ${new Date(torrent.addedAt).toLocaleDateString('ru-RU')}</span>
+                        <span><i class="fas fa-link"></i> Внешний торрент</span>
+                    </div>
+                </div>
+                <div class="result-actions">
+                    <button class="play-btn" onclick="app.playExternalTorrent('${torrent.id}', '${this.escapeHtml(torrent.title)}', '${this.escapeHtml(torrent.magnetLink)}')">
+                        <i class="fas fa-play"></i> Воспроизвести
+                    </button>
+                    <button class="delete-external-btn" onclick="app.deleteExternalTorrent('${torrent.id}')" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 12px 20px; border: none; border-radius: 8px; color: white; cursor: pointer; transition: transform 0.2s;">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async addExternalTorrent(title, magnetLink) {
+        try {
+            const response = await fetch('/api/external-torrents', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ title, magnetLink })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to add torrent');
+            }
+
+            // Перезагружаем список
+            await this.loadExternalTorrents();
+            
+            // Очищаем форму
+            document.getElementById('externalTorrentTitle').value = '';
+            document.getElementById('externalTorrentMagnet').value = '';
+            
+            alert('✅ Торрент успешно добавлен!');
+        } catch (error) {
+            console.error('Failed to add external torrent:', error);
+            alert('❌ Ошибка: ' + error.message);
+        }
+    }
+
+    async deleteExternalTorrent(id) {
+        if (!confirm('Вы уверены, что хотите удалить этот торрент?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/external-torrents/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete torrent');
+            }
+
+            // Перезагружаем список
+            await this.loadExternalTorrents();
+            
+            alert('✅ Торрент успешно удален!');
+        } catch (error) {
+            console.error('Failed to delete external torrent:', error);
+            alert('❌ Ошибка удаления торрента');
+        }
+    }
+
+    playExternalTorrent(id, title, magnetLink) {
+        // Используем существующую функцию playTorrent
+        this.playTorrent(magnetLink, title);
+    }
+
+    getTorrentWord(count) {
+        const lastDigit = count % 10;
+        const lastTwoDigits = count % 100;
+        
+        if (lastTwoDigits >= 11 && lastTwoDigits <= 14) {
+            return 'торрентов';
+        }
+        if (lastDigit === 1) {
+            return 'торрент';
+        }
+        if (lastDigit >= 2 && lastDigit <= 4) {
+            return 'торрента';
+        }
+        return 'торрентов';
     }
 }
 

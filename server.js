@@ -2,11 +2,15 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const fs = require('fs').promises;
 const { spawn } = require('child_process');
 require('dotenv').config();
 
 const torrentParser = require('./src/torrentParser');
 const torrServerClient = require('./src/torrServerClient');
+
+// Путь к файлу с внешними торрентами
+const EXTERNAL_TORRENTS_FILE = path.join(__dirname, 'external-torrents.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +25,24 @@ app.use(helmet({
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Функции для работы с внешними торрентами
+async function loadExternalTorrents() {
+  try {
+    const data = await fs.readFile(EXTERNAL_TORRENTS_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // Файл не существует, возвращаем пустой массив
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function saveExternalTorrents(torrents) {
+  await fs.writeFile(EXTERNAL_TORRENTS_FILE, JSON.stringify(torrents, null, 2), 'utf-8');
+}
 
 // API Routes
 app.get('/api/search', async (req, res) => {
@@ -526,6 +548,76 @@ app.get('/api/check-codec/:filename?', async (req, res) => {
       error: 'Failed to check codec',
       needsTranscode: true
     });
+  }
+});
+
+// API endpoints для внешних торрентов
+
+// GET - получить все внешние торренты
+app.get('/api/external-torrents', async (req, res) => {
+  try {
+    const torrents = await loadExternalTorrents();
+    res.json(torrents);
+  } catch (error) {
+    console.error('Failed to load external torrents:', error);
+    res.status(500).json({ error: 'Failed to load external torrents' });
+  }
+});
+
+// POST - добавить новый внешний торрент
+app.post('/api/external-torrents', async (req, res) => {
+  try {
+    const { title, magnetLink } = req.body;
+    
+    if (!title || !magnetLink) {
+      return res.status(400).json({ error: 'Title and magnetLink are required' });
+    }
+
+    // Проверка формата magnet-ссылки
+    if (!magnetLink.startsWith('magnet:?')) {
+      return res.status(400).json({ error: 'Invalid magnet link format' });
+    }
+
+    const torrents = await loadExternalTorrents();
+    
+    // Создаем новый торрент с уникальным ID
+    const newTorrent = {
+      id: Date.now().toString(),
+      title: title.trim(),
+      magnetLink: magnetLink.trim(),
+      addedAt: new Date().toISOString()
+    };
+
+    torrents.push(newTorrent);
+    await saveExternalTorrents(torrents);
+
+    console.log('Added external torrent:', title);
+    res.json(newTorrent);
+  } catch (error) {
+    console.error('Failed to add external torrent:', error);
+    res.status(500).json({ error: 'Failed to add external torrent' });
+  }
+});
+
+// DELETE - удалить внешний торрент
+app.delete('/api/external-torrents/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const torrents = await loadExternalTorrents();
+    const filteredTorrents = torrents.filter(t => t.id !== id);
+    
+    if (torrents.length === filteredTorrents.length) {
+      return res.status(404).json({ error: 'Torrent not found' });
+    }
+
+    await saveExternalTorrents(filteredTorrents);
+    
+    console.log('Deleted external torrent:', id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete external torrent:', error);
+    res.status(500).json({ error: 'Failed to delete external torrent' });
   }
 });
 
