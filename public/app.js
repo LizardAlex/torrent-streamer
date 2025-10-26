@@ -510,8 +510,23 @@ class TorrentApp {
                     <div class="file-list">
                         ${data.files.map((file, index) => {
                             const isWatched = this.isEpisodeWatched(hash, index);
+                            const position = this.getPlaybackPosition(hash, index);
+                            let progressPercent = 0;
+                            let progressHTML = '';
+                            
+                            // Если есть сохраненная позиция и длительность, вычисляем прогресс
+                            if (position && position.duration && position.time > 0) {
+                                progressPercent = Math.min(100, (position.time / position.duration) * 100);
+                                if (progressPercent > 0.5) { // Показываем прогресс-бар только если просмотрено хотя бы 0.5%
+                                    const fullClass = progressPercent >= 99 ? 'full' : '';
+                                    progressHTML = `<div class="file-item-progress ${fullClass}" style="width: ${progressPercent}%"></div>`;
+                                    console.log(`📊 Episode ${index + 1}: Progress ${progressPercent.toFixed(1)}% (${position.time}s / ${position.duration}s)`);
+                                }
+                            }
+                            
                             return `
                             <div class="file-item ${isWatched ? 'watched' : ''}" data-stream-url="${file.streamUrl}" data-m3u8-url="${file.m3u8Url || file.streamUrl}" data-transcode-url="${file.transcodeUrl || ''}" data-file-name="${this.escapeHtml(file.name)}" data-file-index="${index}">
+                                ${progressHTML}
                                 <div class="file-info">
                                     <div class="file-number">${index + 1}</div>
                                     <div class="file-details">
