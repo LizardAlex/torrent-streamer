@@ -6,6 +6,61 @@ class TorrentApp {
         this.currentFileIndex = 0; // Индекс текущей серии
         this.favorites = this.loadFavorites();
         this.recentlyWatched = this.loadRecentlyWatched();
+        
+        // Проверка авторизации перед инициализацией
+        this.checkAuth();
+    }
+
+    // Проверка авторизации
+    checkAuth() {
+        const isAuthorized = localStorage.getItem('torrent_auth');
+        
+        if (isAuthorized === 'true') {
+            // Пользователь авторизован, скрываем форму и инициализируем приложение
+            document.getElementById('authOverlay').classList.add('hidden');
+            this.initializeApp();
+        } else {
+            // Показываем форму авторизации
+            this.initializeAuthForm();
+        }
+    }
+
+    // Инициализация формы авторизации
+    initializeAuthForm() {
+        const authForm = document.getElementById('authForm');
+        const authPassword = document.getElementById('authPassword');
+        const authError = document.getElementById('authError');
+
+        authForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const password = authPassword.value;
+            const correctPassword = 'test123';
+
+            if (password === correctPassword) {
+                // Пароль верный, сохраняем в localStorage
+                localStorage.setItem('torrent_auth', 'true');
+                
+                // Скрываем форму авторизации
+                document.getElementById('authOverlay').classList.add('hidden');
+                
+                // Инициализируем приложение
+                this.initializeApp();
+                
+                // Очищаем поле пароля
+                authPassword.value = '';
+                authError.classList.remove('show');
+            } else {
+                // Пароль неверный, показываем ошибку
+                authError.classList.add('show');
+                authPassword.value = '';
+                authPassword.focus();
+            }
+        });
+    }
+
+    // Инициализация приложения после успешной авторизации
+    initializeApp() {
         this.initializeEventListeners();
         this.initializeTabs();
         this.renderFavorites();
