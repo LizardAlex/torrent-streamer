@@ -260,8 +260,8 @@ app.head('/api/transcode/:filename?', async (req, res) => {
       '-v', 'quiet',
       '-print_format', 'json',
       '-show_format',
-      '-analyzeduration', '5000000',
-      '-probesize', '5000000',
+      '-analyzeduration', '100000000', // Увеличено до 100 секунд для надежного анализа
+      '-probesize', '50000000', // Увеличено до 50MB для больших файлов
       streamUrl
     ]);
     
@@ -277,12 +277,19 @@ app.head('/api/transcode/:filename?', async (req, res) => {
             const probeData = JSON.parse(probeOutput);
             if (probeData.format && probeData.format.duration) {
               const videoDuration = Math.floor(parseFloat(probeData.format.duration));
-              console.log(`✅ HEAD: Video duration: ${videoDuration}s (${Math.floor(videoDuration/60)}:${(videoDuration%60).toString().padStart(2,'0')})`);
+              const minutes = Math.floor(videoDuration / 60);
+              const seconds = videoDuration % 60;
+              console.log(`✅ HEAD: Video duration determined: ${videoDuration}s (${minutes}:${seconds.toString().padStart(2,'0')} = ${(videoDuration/60).toFixed(2)} min)`);
+              console.log(`   File: ${filename || 'default'}, Full format info:`, JSON.stringify(probeData.format, null, 2));
               res.setHeader('X-Video-Duration', videoDuration.toString());
+            } else {
+              console.error('❌ HEAD: No duration found in ffprobe output');
             }
           } catch (e) {
-            console.error('Failed to parse ffprobe output:', e);
+            console.error('❌ HEAD: Failed to parse ffprobe output:', e);
           }
+        } else {
+          console.error(`❌ HEAD: ffprobe exited with code ${code}`);
         }
         resolve();
       });
@@ -337,8 +344,8 @@ app.get('/api/transcode/:filename?', async (req, res) => {
         '-v', 'quiet',
         '-print_format', 'json',
         '-show_format',
-        '-analyzeduration', '5000000',
-        '-probesize', '5000000',
+        '-analyzeduration', '100000000', // Увеличено до 100 секунд для надежного анализа
+        '-probesize', '50000000', // Увеличено до 50MB для больших файлов
         streamUrl
       ]);
       
@@ -354,11 +361,18 @@ app.get('/api/transcode/:filename?', async (req, res) => {
               const probeData = JSON.parse(probeOutput);
               if (probeData.format && probeData.format.duration) {
                 videoDuration = Math.floor(parseFloat(probeData.format.duration));
-                console.log(`✅ Video duration: ${videoDuration}s (${Math.floor(videoDuration/60)}:${(videoDuration%60).toString().padStart(2,'0')})`);
+                const minutes = Math.floor(videoDuration / 60);
+                const seconds = videoDuration % 60;
+                console.log(`✅ GET: Video duration determined: ${videoDuration}s (${minutes}:${seconds.toString().padStart(2,'0')} = ${(videoDuration/60).toFixed(2)} min)`);
+                console.log(`   File: ${filename || 'default'}, Full format info:`, JSON.stringify(probeData.format, null, 2));
+              } else {
+                console.error('❌ GET: No duration found in ffprobe output');
               }
             } catch (e) {
-              console.error('Failed to parse ffprobe output:', e);
+              console.error('❌ GET: Failed to parse ffprobe output:', e);
             }
+          } else {
+            console.error(`❌ GET: ffprobe exited with code ${code}`);
           }
           resolve();
         });
@@ -484,8 +498,8 @@ app.get('/api/check-codec/:filename?', async (req, res) => {
       '-v', 'quiet',
       '-print_format', 'json',
       '-show_streams',
-      '-analyzeduration', '5000000', // 5 секунд анализа
-      '-probesize', '5000000',
+      '-analyzeduration', '100000000', // Увеличено до 100 секунд для надежного анализа
+      '-probesize', '50000000', // Увеличено до 50MB для больших файлов
       streamUrl
     ]);
     

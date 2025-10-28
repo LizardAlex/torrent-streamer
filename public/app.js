@@ -61,10 +61,43 @@ class TorrentApp {
 
     // Инициализация приложения после успешной авторизации
     initializeApp() {
+        this.cleanupInvalidPlaybackData();
         this.initializeEventListeners();
         this.initializeTabs();
         this.renderFavorites();
         this.renderRecentlyWatched();
+    }
+    
+    // Очистка некорректных данных о позициях воспроизведения
+    cleanupInvalidPlaybackData() {
+        try {
+            const positions = this.loadPlaybackPositions();
+            let hasChanges = false;
+            
+            for (const [key, position] of Object.entries(positions)) {
+                // Проверяем на явно некорректные данные
+                if (position.time && position.duration && position.time > position.duration) {
+                    console.warn(`🧹 Cleaning up invalid position for ${key}: time ${position.time}s > duration ${position.duration}s`);
+                    delete positions[key];
+                    hasChanges = true;
+                }
+                
+                // Проверяем подозрительно короткую длительность при большом времени просмотра
+                if (position.time && position.duration && 
+                    position.duration < 600 && position.time > 1200) {
+                    console.warn(`🧹 Cleaning up suspicious duration for ${key}: duration ${position.duration}s (${(position.duration/60).toFixed(2)} min) seems incorrect for watch time ${position.time}s (${(position.time/60).toFixed(2)} min)`);
+                    delete positions[key];
+                    hasChanges = true;
+                }
+            }
+            
+            if (hasChanges) {
+                localStorage.setItem('playback_positions', JSON.stringify(positions));
+                console.log('✅ Invalid playback data cleaned up');
+            }
+        } catch (error) {
+            console.error('Error cleaning up playback data:', error);
+        }
     }
 
     // LocalStorage функции
@@ -705,14 +738,30 @@ class TorrentApp {
         if (savedPosition && !isTranscoded) {
             // Для прямого потока используем встроенный механизм
             startFromPosition = savedPosition.time;
-            console.log(`⏩ Resuming from saved position: ${startFromPosition}s`);
+            console.log(`⏩ Resuming from saved position: ${startFromPosition}s (${(startFromPosition/60).toFixed(2)} min)`);
         } else if (savedPosition && isTranscoded) {
             // Для транскодинга добавляем параметр seek в URL
             const baseUrl = streamUrl.split('?')[0];
             const params = new URLSearchParams(streamUrl.split('?')[1] || '');
             params.set('seek', savedPosition.time.toString());
             streamUrl = `${baseUrl}?${params.toString()}`;
-            console.log(`⏩ Resuming transcoded stream from: ${savedPosition.time}s`);
+            console.log(`⏩ Resuming transcoded stream from: ${savedPosition.time}s (${(savedPosition.time/60).toFixed(2)} min)`);
+            
+            // Проверяем корректность сохраненной длительности
+            if (savedPosition.duration) {
+                console.log(`   Saved duration: ${savedPosition.duration}s (${(savedPosition.duration/60).toFixed(2)} min)`);
+                
+                // Если позиция больше длительности - это явно ошибка
+                if (savedPosition.time > savedPosition.duration) {
+                    console.error(`❌ ERROR: Saved position (${savedPosition.time}s) exceeds duration (${savedPosition.duration}s)!`);
+                    console.error(`❌ This indicates incorrect duration detection. Clearing position.`);
+                    this.clearPlaybackPosition(this.currentTorrent.hash, index);
+                    // Начинаем с начала
+                    const paramsFixed = new URLSearchParams(streamUrl.split('?')[1] || '');
+                    paramsFixed.delete('seek');
+                    streamUrl = `${baseUrl}?${paramsFixed.toString()}`;
+                }
+            }
         }
         
         // Используем ТОЛЬКО прямое воспроизведение, т.к. torrServer возвращает M3U (не M3U8)
@@ -721,12 +770,15 @@ class TorrentApp {
         
         // Для транскодинга: пытаемся получить длительность из заголовка ответа
         if (isTranscoded) {
+            console.log(`🔍 Requesting video duration via HEAD for transcoded stream: ${fileName}`);
             fetch(streamUrl, { method: 'HEAD' })
                 .then(response => {
                     const duration = response.headers.get('X-Video-Duration');
                     if (duration) {
                         const durationSeconds = parseInt(duration);
-                        console.log(`📏 Got duration from server: ${durationSeconds}s (${Math.floor(durationSeconds/60)}:${(durationSeconds%60).toString().padStart(2,'0')})`);
+                        const minutes = Math.floor(durationSeconds / 60);
+                        const seconds = durationSeconds % 60;
+                        console.log(`📏 Got duration from server: ${durationSeconds}s (${minutes}:${seconds.toString().padStart(2,'0')} = ${(durationSeconds/60).toFixed(2)} min)`);
                         
                         // Сохраняем только длительность, не трогая currentTime
                         const allPositions = this.loadPlaybackPositions();
@@ -734,7 +786,11 @@ class TorrentApp {
                         
                         if (allPositions[positionKey]) {
                             // Обновляем только duration, сохраняя существующий time
+                            const oldDuration = allPositions[positionKey].duration;
                             allPositions[positionKey].duration = durationSeconds;
+                            if (oldDuration && oldDuration !== durationSeconds) {
+                                console.warn(`⚠️ Duration changed from ${oldDuration}s to ${durationSeconds}s for ${positionKey}`);
+                            }
                         } else {
                             // Создаем новую запись с duration
                             allPositions[positionKey] = {
@@ -746,10 +802,12 @@ class TorrentApp {
                         }
                         
                         localStorage.setItem('playback_positions', JSON.stringify(allPositions));
-                        console.log(`💾 Duration saved: ${durationSeconds}s for ${positionKey}`);
+                        console.log(`💾 Duration saved: ${durationSeconds}s (${(durationSeconds/60).toFixed(2)} min) for ${positionKey}`);
+                    } else {
+                        console.error('❌ No X-Video-Duration header received from server');
                     }
                 })
-                .catch(err => console.warn('Failed to get duration from header:', err));
+                .catch(err => console.error('❌ Failed to get duration from header:', err));
         }
         
         videoPlayer.src = streamUrl;
@@ -818,7 +876,7 @@ class TorrentApp {
                     // Если есть сохраненная длительность, используем её
                     if (allPositions[positionKey] && allPositions[positionKey].duration) {
                         videoDuration = allPositions[positionKey].duration;
-                        console.log(`📏 Loaded duration from localStorage: ${Math.floor(videoDuration)}s for transcoded video`);
+                        console.log(`📏 Loaded duration from localStorage: ${Math.floor(videoDuration)}s (${(videoDuration/60).toFixed(2)} min) for transcoded video`);
                     }
                 }
                 
@@ -827,8 +885,17 @@ class TorrentApp {
                     const realTime = videoPlayer.currentTime + (this.transcodeTimeOffset || 0);
                     const progress = realTime / videoDuration;
                     
+                    // ВАЖНАЯ ПРОВЕРКА: если длительность подозрительно короткая (меньше 10 минут), 
+                    // а мы уже смотрим больше 20 минут - значит длительность определена неправильно
+                    if (videoDuration < 600 && realTime > 1200) {
+                        console.warn(`⚠️ Suspicious duration detected! Saved duration: ${videoDuration}s (${(videoDuration/60).toFixed(2)} min), but already watched: ${realTime}s (${(realTime/60).toFixed(2)} min)`);
+                        console.warn(`⚠️ This might indicate incorrect duration detection. Skipping watch progress tracking.`);
+                        // Не помечаем как просмотренное и не очищаем позицию
+                        return;
+                    }
+                    
                     // Очищаем позицию когда видео досмотрено до конца (последние 30 секунд)
-                    if (videoDuration - realTime < 30) {
+                    if (videoDuration - realTime < 30 && videoDuration - realTime > 0) {
                         this.clearPlaybackPosition(this.currentTorrent.hash, index);
                     }
                     
@@ -836,12 +903,12 @@ class TorrentApp {
                     if (progress >= 0.9 && !hasMarkedAsWatched) {
                         hasMarkedAsWatched = true;
                         this.markEpisodeAsWatched(this.currentTorrent.hash, index);
-                        console.log(`✅ Episode marked as watched (90% progress, transcoded): ${fileName}, realTime: ${Math.floor(realTime)}s / ${Math.floor(videoDuration)}s`);
+                        console.log(`✅ Episode marked as watched (90% progress, transcoded): ${fileName}, realTime: ${Math.floor(realTime)}s / ${Math.floor(videoDuration)}s (${(progress*100).toFixed(1)}%)`);
                     }
                 } else {
-                    // Если длительности нет, выводим предупреждение раз в 10 секунд
-                    if (Math.floor(videoPlayer.currentTime) % 10 === 0 && Math.floor(videoPlayer.currentTime) !== 0) {
-                        console.warn(`⚠️ No duration available for transcoded video. Cannot calculate 90% progress. Play the video in direct mode first to save duration.`);
+                    // Если длительности нет, выводим предупреждение раз в 30 секунд
+                    if (Math.floor(videoPlayer.currentTime) % 30 === 0 && Math.floor(videoPlayer.currentTime) !== 0) {
+                        console.warn(`⚠️ No duration available for transcoded video at ${Math.floor(videoPlayer.currentTime)}s. Cannot calculate watch progress.`);
                     }
                 }
             }
