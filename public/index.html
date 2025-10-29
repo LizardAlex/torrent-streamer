@@ -480,6 +480,7 @@
         .file-item {
             display: flex;
             align-items: flex-start;
+            flex-wrap: nowrap; /* Не переносим элементы на новую строку */
             padding: 15px;
             border: 1px solid #333;
             border-radius: 8px;
@@ -487,7 +488,7 @@
             transition: all 0.2s;
             background: #0a0a0a;
             position: relative;
-            overflow: hidden;
+            overflow: hidden; /* Скрываем overflow, но внутренние элементы должны быть видны */
             min-height: 85px;
         }
 
@@ -538,6 +539,8 @@
             align-items: center;
             gap: 15px;
             padding-bottom: 8px;
+            min-width: 0; /* Позволяет сжиматься */
+            overflow: hidden; /* Обрезаем контент */
         }
 
         .file-number {
@@ -551,10 +554,13 @@
             border-radius: 50%;
             font-weight: 600;
             font-size: 0.9rem;
+            flex-shrink: 0; /* Номер не сжимается */
         }
 
         .file-details {
             flex: 1;
+            min-width: 0; /* Позволяет flex-элементу сжиматься меньше содержимого */
+            overflow: hidden; /* Обрезаем выходящий контент */
         }
 
         .file-name {
@@ -566,6 +572,7 @@
             overflow-wrap: break-word;
             display: -webkit-box;
             -webkit-line-clamp: 2;
+            line-clamp: 2; /* Стандартное свойство */
             -webkit-box-orient: vertical;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -579,6 +586,8 @@
         .file-actions {
             display: flex;
             gap: 10px;
+            flex-shrink: 0; /* Предотвращаем сжатие кнопок */
+            margin-left: 10px; /* Отступ от названия */
         }
 
         .file-play-btn {
@@ -590,6 +599,8 @@
             transition: all 0.2s;
             font-size: 1.1rem;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            white-space: nowrap; /* Текст кнопки не переносится */
+            flex-shrink: 0; /* Кнопка не сжимается */
         }
 
         .file-play-btn:hover {

@@ -592,7 +592,7 @@ class TorrentApp {
                         <h3>Выберите файл для воспроизведения:</h3>
                         <p class="file-count">${data.files.length} файлов</p>
                         <div style="margin-top: 10px; padding: 10px; background-color: #3a3a3a; border-radius: 5px; font-size: 0.85rem; color: #ffaa00;">
-                            <i class="fas fa-info-circle"></i> <strong>Совет:</strong> Если видео не воспроизводится, попробуйте другую раздачу (избегайте AVI, выбирайте MP4/MKV с AAC аудио).
+                            <i class="fas fa-info-circle"></i> <strong>Совет:</strong> AVI/MKV/MP4 поддерживаются. На Xbox старые AVI могут потребовать транскодинг (автоматически предлагается при несовместимом аудио).
                         </div>
                     </div>
                     <div class="file-list">
