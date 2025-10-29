@@ -8,11 +8,11 @@ class TorrServerClient {
     this.auth = Buffer.from(`${this.username}:${this.password}`).toString('base64');
     
     // Отслеживание активных торрентов
-    this.activeTorrents = new Map(); // hash -> { lastActivity: timestamp, title: string }
-    this.inactivityTimeout = 3 * 60 * 1000; // 3 минуты неактивности
+    this.activeTorrents = new Map(); // hash -> { lastActivity: timestamp, title: string, keepAliveInterval?: NodeJS.Timeout }
+    this.inactivityTimeout = 30 * 60 * 1000; // 30 минут неактивности (увеличено для длительных фильмов)
     
-    // Запускаем очистку каждые 30 секунд
-    this.cleanupInterval = setInterval(() => this.cleanupInactiveTorrents(), 30000);
+    // Запускаем очистку каждые 60 секунд
+    this.cleanupInterval = setInterval(() => this.cleanupInactiveTorrents(), 60000);
   }
 
   async addTorrent(magnetLink, title = 'Unknown') {
@@ -153,6 +153,9 @@ class TorrServerClient {
   async removeTorrent(hash) {
     try {
       console.log(`Removing torrent from torrServer: ${hash}`);
+      
+      // Останавливаем keep-alive если есть
+      this.stopKeepAlive(hash);
       
       // TorrServer API: POST /torrents с action: 'rem'
       const response = await axios.post(`${this.baseUrl}/torrents`, {
@@ -440,11 +443,53 @@ class TorrServerClient {
   // Регистрация активности торрента
   registerTorrentActivity(hash, title = 'Unknown') {
     const hashUpper = hash.toUpperCase();
+    const existing = this.activeTorrents.get(hashUpper);
+    
     this.activeTorrents.set(hashUpper, {
       lastActivity: Date.now(),
-      title: title
+      title: title,
+      keepAliveInterval: existing?.keepAliveInterval // Сохраняем существующий интервал если есть
     });
-    console.log(`Registered activity for torrent: ${title} (${hashUpper})`);
+    console.log(`📍 Registered activity for torrent: ${title} (${hashUpper})`);
+  }
+
+  // Запуск автоматического обновления активности (для транскодинга)
+  startKeepAlive(hash, title = 'Unknown') {
+    const hashUpper = hash.toUpperCase();
+    const existing = this.activeTorrents.get(hashUpper);
+    
+    // Если уже есть keep-alive интервал, не создаём новый
+    if (existing?.keepAliveInterval) {
+      console.log(`⏰ Keep-alive already running for: ${title} (${hashUpper})`);
+      return;
+    }
+    
+    // Обновляем активность каждые 2 минуты (меньше таймаута в 30 минут)
+    const keepAliveInterval = setInterval(() => {
+      this.registerTorrentActivity(hashUpper, title);
+      console.log(`💓 Keep-alive ping for torrent: ${title} (${hashUpper})`);
+    }, 2 * 60 * 1000); // Каждые 2 минуты
+    
+    this.activeTorrents.set(hashUpper, {
+      lastActivity: Date.now(),
+      title: title,
+      keepAliveInterval: keepAliveInterval
+    });
+    
+    console.log(`⏰ Started keep-alive for torrent: ${title} (${hashUpper}), ping every 2 minutes`);
+  }
+
+  // Остановка автоматического обновления активности
+  stopKeepAlive(hash) {
+    const hashUpper = hash.toUpperCase();
+    const torrent = this.activeTorrents.get(hashUpper);
+    
+    if (torrent?.keepAliveInterval) {
+      clearInterval(torrent.keepAliveInterval);
+      torrent.keepAliveInterval = undefined;
+      this.activeTorrents.set(hashUpper, torrent);
+      console.log(`⏰ Stopped keep-alive for torrent: ${torrent.title} (${hashUpper})`);
+    }
   }
 
   // Очистка неактивных торрентов
@@ -454,9 +499,10 @@ class TorrServerClient {
 
     for (const [hash, info] of this.activeTorrents.entries()) {
       const inactiveTime = now - info.lastActivity;
+      const inactiveMinutes = Math.round(inactiveTime / 60000);
       
       if (inactiveTime > this.inactivityTimeout) {
-        console.log(`Torrent ${info.title} (${hash}) has been inactive for ${Math.round(inactiveTime / 1000)}s`);
+        console.log(`🗑️ Torrent ${info.title} (${hash}) has been inactive for ${inactiveMinutes} minutes (timeout: ${this.inactivityTimeout / 60000} min)`);
         torrentsToRemove.push({ hash, title: info.title });
       }
     }
@@ -464,22 +510,30 @@ class TorrServerClient {
     // Удаляем неактивные торренты
     for (const torrent of torrentsToRemove) {
       try {
-        console.log(`Auto-removing inactive torrent: ${torrent.title} (${torrent.hash})`);
-        await this.removeTorrent(torrent.hash);
+        console.log(`🗑️ Auto-removing inactive torrent: ${torrent.title} (${torrent.hash})`);
+        await this.removeTorrent(torrent.hash); // removeTorrent уже вызывает stopKeepAlive
       } catch (error) {
-        console.error(`Failed to auto-remove torrent ${torrent.hash}:`, error.message);
-        // Удаляем из списка отслеживаемых даже если удаление не удалось
+        console.error(`❌ Failed to auto-remove torrent ${torrent.hash}:`, error.message);
+        // Останавливаем keep-alive и удаляем из списка отслеживаемых даже если удаление не удалось
+        this.stopKeepAlive(torrent.hash);
         this.activeTorrents.delete(torrent.hash);
       }
     }
 
     if (torrentsToRemove.length > 0) {
-      console.log(`Cleaned up ${torrentsToRemove.length} inactive torrents`);
+      console.log(`✅ Cleaned up ${torrentsToRemove.length} inactive torrents`);
     }
   }
 
   // Остановка очистки (для graceful shutdown)
   stopCleanup() {
+    // Останавливаем все keep-alive интервалы
+    for (const [hash, torrent] of this.activeTorrents.entries()) {
+      if (torrent.keepAliveInterval) {
+        this.stopKeepAlive(hash);
+      }
+    }
+    
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       console.log('Torrent cleanup stopped');

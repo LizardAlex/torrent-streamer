@@ -312,6 +312,8 @@ app.get('/api/transcode/:filename?', async (req, res) => {
     const hash = req.query.link;
     if (hash) {
       torrServerClient.registerTorrentActivity(hash, 'transcoding');
+      // Запускаем автоматическое обновление активности (keep-alive каждые 2 минуты)
+      torrServerClient.startKeepAlive(hash, 'transcoding');
     }
     
     // Извлекаем параметр seek (если есть)
@@ -441,6 +443,10 @@ app.get('/api/transcode/:filename?', async (req, res) => {
     req.on('close', () => {
       console.log('Client disconnected, killing FFmpeg process');
       ffmpeg.kill('SIGKILL');
+      // Останавливаем keep-alive для этого торрента
+      if (hash) {
+        torrServerClient.stopKeepAlive(hash);
+      }
     });
     
     // Обрабатываем завершение FFmpeg
@@ -449,6 +455,10 @@ app.get('/api/transcode/:filename?', async (req, res) => {
         console.error(`FFmpeg process exited with code ${code}`);
       } else {
         console.log('FFmpeg transcoding finished successfully');
+      }
+      // Останавливаем keep-alive когда транскодинг завершён
+      if (hash) {
+        torrServerClient.stopKeepAlive(hash);
       }
     });
     
